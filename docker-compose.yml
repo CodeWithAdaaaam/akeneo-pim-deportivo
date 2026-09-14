@@ -1,6 +1,10 @@
 services:
+  # akeneo/pim-php-dev, akeneo/node et google/cloud-sdk ne sont publiees qu'en
+  # amd64. La plateforme est figee pour que Docker Desktop les emule sur un Mac
+  # Apple Silicon ; sur une machine amd64 elles tournent nativement.
   php:
     image: 'akeneo/pim-php-dev:8.3'
+    platform: linux/amd64
     profiles:
       - 'tools'
     environment:
@@ -22,6 +26,7 @@ services:
 
   fpm:
     image: 'akeneo/pim-php-dev:8.3'
+    platform: linux/amd64
     environment:
       APP_ENV: '${APP_ENV:-prod}'
       BEHAT_TMPDIR: '/srv/pim/var/cache/tmp'
@@ -38,6 +43,7 @@ services:
 
   node:
     image: 'akeneo/node:18'
+    platform: linux/amd64
     profiles:
       - 'tools'
     environment:
@@ -51,8 +57,13 @@ services:
     networks:
       - 'pim'
 
+  # Tests end-to-end seulement : range dans un profil pour ne pas demarrer avec
+  # `make up` et laisser la memoire a la stack Magento qui tourne a cote.
+  # `docker-compose --profile e2e up -d selenium` pour le lancer.
   selenium:
     image: 'selenium/standalone-chrome:150.0-20260808'
+    profiles:
+      - 'e2e'
     volumes:
       - './:/srv/pim:ro'
       - '/dev/shm:/dev/shm'
@@ -68,7 +79,11 @@ services:
     depends_on:
       - 'fpm'
     ports:
-      - '${DOCKER_PORT_HTTP:-8080}:80'
+      # 8090 par defaut : c'est l'adresse qu'attend Magento
+      # (http://host.docker.internal:8090/). Le script post-install de composer
+      # (install-required-files.sh) ecrase .env a chaque `composer install` et
+      # y perd DOCKER_PORT_HTTP : la valeur par defaut doit donc etre ici.
+      - '${DOCKER_PORT_HTTP:-8090}:80'
     volumes:
       - './:/srv/pim:ro'
       - './docker/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro'
@@ -111,7 +126,9 @@ services:
       - 'pim'
 
   object-storage:
-    image: 'minio/minio:RELEASE.2025-09-07T16-13-09Z'
+    # minio/minio n'est plus distribue sur Docker Hub (acces refuse) : meme tag,
+    # en multi-arch, sur quay.io.
+    image: 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z'
     entrypoint: >
       /bin/sh -c "mkdir -p /data/asset /data/catalog /data/jobs /data/archive /data/category /data/catalogsmapping
       && minio server --console-address :9091 /data"
@@ -126,6 +143,7 @@ services:
 
   pubsub-emulator:
     image: 'google/cloud-sdk:375.0.0-emulators'
+    platform: linux/amd64
     command: 'gcloud --user-output-enabled --log-http beta emulators pubsub start --host-port=0.0.0.0:8085'
     networks:
       - 'pim'
